@@ -3,6 +3,8 @@ import uuid
 import logging
 from datetime import datetime
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from agents.state import AssistState
 from utils.llm import chat_completion
 
@@ -16,7 +18,7 @@ except FileNotFoundError:
     CAREGIVER_PROMPT = "You are a caregiver alert system. Be clear and actionable."
 
 
-async def caregiver_agent(state: AssistState) -> AssistState:
+async def caregiver_agent(state: AssistState, db: AsyncSession = None) -> AssistState:
     """
     Runs in parallel with Assistance Agent when the Reasoning Agent
     decides the caregiver needs to know something.
@@ -57,17 +59,32 @@ async def caregiver_agent(state: AssistState) -> AssistState:
         updates["llm_calls_made"] = state.get("llm_calls_made", 0) + 1
 
     # ---------------------------------------------------------------
-    # CBD — Caregiver Burnout Detection
-    # Track patterns that indicate the caregiver is wearing down.
-    # For now we compute a simple score — the full CBD with rolling
-    # 7-day windows comes later.
+    # CBD — Caregiver Burnout Detection (full version)
+    # Uses rolling 7-day behavioral analysis across 5 dimensions.
+    # Only runs when we have a DB session and know who the caregiver is.
     # ---------------------------------------------------------------
-    cbd_result = _compute_cbd_score(state)
-    updates["cbd_score"] = cbd_result["score"]
-    updates["cbd_intervention"] = cbd_result["intervention"]
+    caregiver_id = _resolve_caregiver_id(state)
+    if caregiver_id and db:
+        try:
+            from innovations.cbd import compute_cbd_score
+            cbd_result = await compute_cbd_score(caregiver_id, db)
+            updates["cbd_score"] = cbd_result["score"]
+            updates["cbd_intervention"] = cbd_result["intervention_message"]
 
-    if cbd_result["intervention"]:
-        logger.info(f"CBD intervention triggered: {cbd_result['intervention']}")
+            if cbd_result["intervention_message"]:
+                logger.info(
+                    f"CBD intervention: level={cbd_result['intervention_level']}, "
+                    f"score={cbd_result['score']}"
+                )
+        except Exception as e:
+            logger.warning(f"Full CBD failed, using simple fallback: {e}")
+            simple = _compute_cbd_score_simple(state)
+            updates["cbd_score"] = simple["score"]
+            updates["cbd_intervention"] = simple["intervention"]
+    else:
+        simple = _compute_cbd_score_simple(state)
+        updates["cbd_score"] = simple["score"]
+        updates["cbd_intervention"] = simple["intervention"]
 
     return {**state, **updates}
 
@@ -209,44 +226,42 @@ If burnout score is high (>60), gently suggest they take care of themselves too.
     )
 
 
-def _compute_cbd_score(state: AssistState) -> dict:
+def _resolve_caregiver_id(state: AssistState) -> str | None:
     """
-    CBD — Caregiver Burnout Detection (simplified for hackathon)
+    Figure out which caregiver to run CBD on.
+    If the current user IS a caregiver, use their ID.
+    Otherwise we'd need to look up the patient's primary caregiver,
+    but that requires a DB call we'll handle in the pipeline.
+    """
+    if state.get("role") == "caregiver":
+        return state.get("user_id")
+    # For patient triggers, the caregiver ID gets set by the pipeline
+    # when it finds the caregiver link
+    return state.get("caregiver_id")
 
-    Full version uses rolling 7-day windows of:
-    - Alert response times
-    - Message tone shifts
-    - Login frequency
-    - Late-night usage patterns
 
-    For now we use a simpler heuristic based on what's available
-    in the current state. The Learning Agent will build the full
-    behavioral model over time.
+def _compute_cbd_score_simple(state: AssistState) -> dict:
+    """
+    Simplified fallback CBD — used when full DB-based CBD can't run.
+    Just checks time-of-day and alert volume from the current state.
     """
     score = state.get("cbd_score", 0.0)
     intervention = None
 
-    # Late night usage bump — if it's between midnight and 5 AM,
-    # that's a sign the caregiver isn't sleeping well
     hour = datetime.utcnow().hour
     if 0 <= hour < 5 and state.get("role") == "caregiver":
         score += 10
-        logger.info("CBD: late night usage detected (+10)")
 
-    # High alert volume bump — lots of alerts means stressful day
-    # which means the caregiver is probably frazzled
     if state.get("alert_caregiver"):
         score += 5
 
-    # Clamp to 0-100
     score = max(0.0, min(100.0, score))
 
-    # Graduated interventions based on burnout level
     if score >= 80:
-        intervention = "You've been incredibly dedicated. Please consider asking a family member or friend to help for a few hours. You need rest too."
+        intervention = "You've been incredibly dedicated. Please consider asking someone to help."
     elif score >= 60:
-        intervention = "You're doing an amazing job. Remember to take some time for yourself today — even a 15-minute walk can help."
+        intervention = "You're doing an amazing job. Remember to take time for yourself today."
     elif score >= 40:
-        intervention = "Just a gentle reminder — taking care of yourself helps you take better care of them."
+        intervention = "Just a gentle reminder — taking care of yourself helps you take care of them."
 
     return {"score": score, "intervention": intervention}

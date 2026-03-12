@@ -376,8 +376,28 @@ Generate the daily summary now."""
 
 
 # =====================================================
+# GET /caregiver/burnout/{caregiver_id}
+# =====================================================
+
+@router.get("/caregiver/burnout/{caregiver_id}")
+async def get_burnout_score(caregiver_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Returns the full CBD burnout analysis for a caregiver.
+    Monty uses this for the "take care of yourself" card on the dashboard.
+    """
+    try:
+        from innovations.cbd import compute_cbd_score
+        result = await compute_cbd_score(caregiver_id, db)
+        return result
+    except Exception as e:
+        logger.error(f"CBD computation failed: {e}")
+        return {"score": 0, "error": str(e)}
+
+
+# =====================================================
 # GET /caregiver/aac/{patient_id}
 # =====================================================
+
 
 @router.get("/caregiver/aac/{patient_id}")
 async def get_aac_score(patient_id: str, db: AsyncSession = Depends(get_db)):

@@ -139,7 +139,7 @@ async def run_pipeline(initial_state: dict, db=None) -> AssistState:
         # asyncio.gather fires both coroutines concurrently.
         results = await run_parallel(
             _run_assistance_safe(state),
-            _run_caregiver_safe(state),
+            _run_caregiver_safe(state, db=db),
             timeout=15.0,
         )
 
@@ -220,10 +220,10 @@ async def _run_assistance_safe(state: AssistState) -> dict:
         }
 
 
-async def _run_caregiver_safe(state: AssistState) -> dict:
+async def _run_caregiver_safe(state: AssistState, db=None) -> dict:
     """Wrapper so caregiver failures don't kill the parallel gather"""
     try:
-        result = await caregiver_agent(state)
+        result = await caregiver_agent(state, db=db)
         return {
             "caregiver_alert_payload": result.get("caregiver_alert_payload"),
             "caregiver_summary": result.get("caregiver_summary"),

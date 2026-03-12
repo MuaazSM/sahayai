@@ -136,160 +136,161 @@ async def get_summary(
     date_str: str = Query(default=None, alias="date", description="YYYY-MM-DD, defaults to today"),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    The big one — "How was Dad's day?"
-    Pulls all events, scores, alerts for the day, then sends them to
-    the LLM to generate a warm, nurse-handoff-style summary.
-    Also returns structured metrics so the Flutter app can render charts.
-    """
-    # Figure out which day we're summarizing
-    if date_str:
-        try:
-            summary_date = date.fromisoformat(date_str)
-        except ValueError:
+    try:
+        if date_str:
+            try:
+                summary_date = date.fromisoformat(date_str)
+            except ValueError:
+                summary_date = date.today()
+        else:
             summary_date = date.today()
-    else:
-        summary_date = date.today()
 
-    day_start = datetime.combine(summary_date, datetime.min.time())
-    day_end = datetime.combine(summary_date, datetime.max.time())
+        day_start = datetime.combine(summary_date, datetime.min.time())
+        day_end = datetime.combine(summary_date, datetime.max.time())
 
-    logger.info(f"Generating summary for patient {patient_id} on {summary_date}")
+        logger.info(f"Generating summary for patient {patient_id} on {summary_date}")
 
-    # ---------------------------------------------------------------
-    # 1. Get patient profile
-    # ---------------------------------------------------------------
-    user = await db.get(User, patient_id)
-    user_name = user.name if user else "the patient"
-    conditions = user.medical_conditions if user else "unknown"
+        # --- Check cache first so we don't regenerate on every refresh ---
+        try:
+            cached_result = await db.execute(
+                select(DailySummary)
+                .where(and_(
+                    DailySummary.patient_id == patient_id,
+                    DailySummary.summary_date == summary_date,
+                ))
+                .order_by(DailySummary.generated_at.desc())
+                .limit(1)
+            )
+            cached = cached_result.scalar_one_or_none()
+            if cached:
+                logger.info("Returning cached summary")
+                events_list = []
+                try:
+                    events_list = [
+                        SummaryEvent(**e) for e in json.loads(cached.events_json or "[]")
+                    ]
+                except Exception:
+                    pass
 
-    # ---------------------------------------------------------------
-    # 2. Pull all events for this day
-    # ---------------------------------------------------------------
-    events_result = await db.execute(
-        select(Event)
-        .where(and_(
-            Event.user_id == patient_id,
-            Event.timestamp >= day_start,
-            Event.timestamp <= day_end,
-        ))
-        .order_by(Event.timestamp.asc())
-    )
-    events = events_result.scalars().all()
+                return SummaryResponse(
+                    summary_text=cached.summary_text,
+                    date=cached.summary_date.isoformat(),
+                    metrics=SummaryMetrics(
+                        medication_adherence=cached.medication_adherence,
+                        steps=cached.total_steps,
+                        alerts_count=cached.alerts_count,
+                        avg_aac_score=cached.avg_aac_score,
+                        cct_trend=cached.cct_trend,
+                    ),
+                    events=events_list,
+                    cct_scores=[],
+                )
+        except Exception as e:
+            logger.warning(f"Cache lookup failed: {e}")
 
-    # ---------------------------------------------------------------
-    # 3. Pull CCT scores for this day
-    # ---------------------------------------------------------------
-    cct_result = await db.execute(
-        select(CCTScore)
-        .where(and_(
-            CCTScore.user_id == patient_id,
-            CCTScore.scored_at >= day_start,
-            CCTScore.scored_at <= day_end,
-        ))
-        .order_by(CCTScore.scored_at.asc())
-    )
-    cct_scores = cct_result.scalars().all()
+        # --- No cache, generate fresh ---
+        user = await db.get(User, patient_id)
+        user_name = user.name if user else "the patient"
+        conditions = user.medical_conditions if user else "unknown"
 
-    # ---------------------------------------------------------------
-    # 4. Pull AAC scores for this day
-    # ---------------------------------------------------------------
-    aac_result = await db.execute(
-        select(AACScore)
-        .where(and_(
-            AACScore.user_id == patient_id,
-            AACScore.calculated_at >= day_start,
-            AACScore.calculated_at <= day_end,
-        ))
-        .order_by(AACScore.calculated_at.asc())
-    )
-    aac_scores = aac_result.scalars().all()
-
-    # ---------------------------------------------------------------
-    # 5. Pull alerts for this day
-    # ---------------------------------------------------------------
-    alerts_result = await db.execute(
-        select(Alert)
-        .where(and_(
-            Alert.patient_id == patient_id,
-            Alert.timestamp >= day_start,
-            Alert.timestamp <= day_end,
-        ))
-        .order_by(Alert.timestamp.asc())
-    )
-    alerts = alerts_result.scalars().all()
-
-    # ---------------------------------------------------------------
-    # 6. Calculate medication adherence
-    #    Count confirmed reminders vs total medication reminders today
-    # ---------------------------------------------------------------
-    med_total_result = await db.execute(
-        select(func.count(Reminder.id))
-        .where(and_(
-            Reminder.user_id == patient_id,
-            Reminder.reminder_type == "medication",
-            Reminder.scheduled_time >= day_start,
-            Reminder.scheduled_time <= day_end,
-        ))
-    )
-    med_total = med_total_result.scalar() or 0
-
-    med_confirmed_result = await db.execute(
-        select(func.count(Reminder.id))
-        .where(and_(
-            Reminder.user_id == patient_id,
-            Reminder.reminder_type == "medication",
-            Reminder.scheduled_time >= day_start,
-            Reminder.scheduled_time <= day_end,
-            Reminder.status == "confirmed",
-        ))
-    )
-    med_confirmed = med_confirmed_result.scalar() or 0
-
-    medication_adherence = (med_confirmed / med_total) if med_total > 0 else 1.0
-
-    # ---------------------------------------------------------------
-    # 7. Compute metrics from what we gathered
-    # ---------------------------------------------------------------
-    total_steps = sum(
-        _extract_steps_from_event(e) for e in events
-    )
-
-    avg_aac = int(
-        sum(a.score for a in aac_scores) / len(aac_scores)
-    ) if aac_scores else (user.aac_baseline if user else 70)
-
-    # CCT trend — compare today's average to yesterday's
-    cct_trend = await _compute_cct_trend(patient_id, summary_date, cct_scores, db)
-
-    # ---------------------------------------------------------------
-    # 8. Format events for the LLM and for the response payload
-    # ---------------------------------------------------------------
-    events_for_llm = _format_events_for_llm(events)
-    events_for_response = [
-        SummaryEvent(
-            time=e.timestamp.strftime("%H:%M"),
-            type=e.event_type,
-            description=e.description,
-            severity=e.severity,
+        events_result = await db.execute(
+            select(Event)
+            .where(and_(
+                Event.user_id == patient_id,
+                Event.timestamp >= day_start,
+                Event.timestamp <= day_end,
+            ))
+            .order_by(Event.timestamp.asc())
         )
-        for e in events
-    ]
+        events = events_result.scalars().all()
 
-    cct_for_response = [
-        CCTScorePoint(
-            date=c.scored_at.strftime("%Y-%m-%d"),
-            score=c.composite_score,
+        cct_result = await db.execute(
+            select(CCTScore)
+            .where(and_(
+                CCTScore.user_id == patient_id,
+                CCTScore.scored_at >= day_start,
+                CCTScore.scored_at <= day_end,
+            ))
+            .order_by(CCTScore.scored_at.asc())
         )
-        for c in cct_scores
-    ]
+        cct_scores = cct_result.scalars().all()
 
-    # ---------------------------------------------------------------
-    # 9. Generate the natural language summary via the Caregiver Agent
-    #    Uses "quality" model (70b) because this is the main thing
-    #    the caregiver reads — it needs to be well-written and accurate
-    # ---------------------------------------------------------------
-    summary_context = f"""
+        aac_result = await db.execute(
+            select(AACScore)
+            .where(and_(
+                AACScore.user_id == patient_id,
+                AACScore.calculated_at >= day_start,
+                AACScore.calculated_at <= day_end,
+            ))
+            .order_by(AACScore.calculated_at.asc())
+        )
+        aac_scores = aac_result.scalars().all()
+
+        alerts_result = await db.execute(
+            select(Alert)
+            .where(and_(
+                Alert.patient_id == patient_id,
+                Alert.timestamp >= day_start,
+                Alert.timestamp <= day_end,
+            ))
+            .order_by(Alert.timestamp.asc())
+        )
+        alerts = alerts_result.scalars().all()
+
+        # Medication adherence
+        med_total_result = await db.execute(
+            select(func.count(Reminder.id))
+            .where(and_(
+                Reminder.user_id == patient_id,
+                Reminder.reminder_type == "medication",
+                Reminder.scheduled_time >= day_start,
+                Reminder.scheduled_time <= day_end,
+            ))
+        )
+        med_total = med_total_result.scalar() or 0
+
+        med_confirmed_result = await db.execute(
+            select(func.count(Reminder.id))
+            .where(and_(
+                Reminder.user_id == patient_id,
+                Reminder.reminder_type == "medication",
+                Reminder.scheduled_time >= day_start,
+                Reminder.scheduled_time <= day_end,
+                Reminder.status == "confirmed",
+            ))
+        )
+        med_confirmed = med_confirmed_result.scalar() or 0
+        medication_adherence = (med_confirmed / med_total) if med_total > 0 else 1.0
+
+        total_steps = sum(_extract_steps_from_event(e) for e in events)
+
+        avg_aac = int(
+            sum(a.score for a in aac_scores) / len(aac_scores)
+        ) if aac_scores else (user.aac_baseline if user else 70)
+
+        cct_trend = await _compute_cct_trend(patient_id, summary_date, cct_scores, db)
+
+        events_for_response = [
+            SummaryEvent(
+                time=e.timestamp.strftime("%H:%M"),
+                type=e.event_type,
+                description=e.description,
+                severity=e.severity,
+            )
+            for e in events
+        ]
+
+        cct_for_response = [
+            CCTScorePoint(
+                date=c.scored_at.strftime("%Y-%m-%d"),
+                score=c.composite_score,
+            )
+            for c in cct_scores
+        ]
+
+        # Generate summary via LLM
+        events_for_llm = _format_events_for_llm(events)
+        summary_context = f"""
 Patient: {user_name}
 Conditions: {conditions}
 Date: {summary_date}
@@ -307,65 +308,90 @@ CCT Scores today:
 Alerts today:
 {_format_alerts_for_llm(alerts) if alerts else "No alerts today."}
 
-Generate the daily summary now.
-"""
+Generate the daily summary now."""
 
-    summary_messages = [
-        {"role": "system", "content": CAREGIVER_PROMPT},
-        {"role": "user", "content": summary_context},
-    ]
+        summary_messages = [
+            {"role": "system", "content": CAREGIVER_PROMPT},
+            {"role": "user", "content": summary_context},
+        ]
 
-    summary_text = await chat_completion(
-        messages=summary_messages,
-        model_preference="quality",
-        temperature=0.5,
-        max_tokens=400,
-    )
-
-    logger.info(f"Summary generated for {user_name} on {summary_date}")
-
-    # ---------------------------------------------------------------
-    # 10. Cache the summary in the DB so we don't regenerate it
-    #     every time the caregiver refreshes the page
-    # ---------------------------------------------------------------
-    try:
-        cached = DailySummary(
-            id=str(uuid.uuid4()),
-            patient_id=patient_id,
-            summary_date=summary_date,
-            summary_text=summary_text,
-            medication_adherence=medication_adherence,
-            total_steps=total_steps,
-            alerts_count=len(alerts),
-            avg_aac_score=avg_aac,
-            cct_trend=cct_trend,
-            events_json=json.dumps([
-                {"time": e.timestamp.strftime("%H:%M"), "type": e.event_type,
-                 "description": e.description, "severity": e.severity}
-                for e in events
-            ]),
+        summary_text = await chat_completion(
+            messages=summary_messages,
+            model_preference="quality",
+            temperature=0.5,
+            max_tokens=400,
         )
-        db.add(cached)
-    except Exception as e:
-        # Caching failure shouldn't break the response
-        logger.warning(f"Failed to cache summary: {e}")
 
-    # ---------------------------------------------------------------
-    # 11. Return everything — text summary + structured metrics + events
-    # ---------------------------------------------------------------
-    return SummaryResponse(
-        summary_text=summary_text,
-        date=summary_date.isoformat(),
-        metrics=SummaryMetrics(
-            medication_adherence=medication_adherence,
-            steps=total_steps,
-            alerts_count=len(alerts),
-            avg_aac_score=avg_aac,
-            cct_trend=cct_trend,
-        ),
-        events=events_for_response,
-        cct_scores=cct_for_response,
-    )
+        # Cache it
+        try:
+            cached_entry = DailySummary(
+                id=str(uuid.uuid4()),
+                patient_id=patient_id,
+                summary_date=summary_date,
+                summary_text=summary_text,
+                medication_adherence=medication_adherence,
+                total_steps=total_steps,
+                alerts_count=len(alerts),
+                avg_aac_score=avg_aac,
+                cct_trend=cct_trend,
+                events_json=json.dumps([
+                    {"time": e.timestamp.strftime("%H:%M"), "type": e.event_type,
+                     "description": e.description, "severity": e.severity}
+                    for e in events
+                ]),
+            )
+            db.add(cached_entry)
+        except Exception as e:
+            logger.warning(f"Failed to cache summary: {e}")
+
+        return SummaryResponse(
+            summary_text=summary_text,
+            date=summary_date.isoformat(),
+            metrics=SummaryMetrics(
+                medication_adherence=medication_adherence,
+                steps=total_steps,
+                alerts_count=len(alerts),
+                avg_aac_score=avg_aac,
+                cct_trend=cct_trend,
+            ),
+            events=events_for_response,
+            cct_scores=cct_for_response,
+        )
+
+    except Exception as e:
+        logger.error(f"Summary generation failed: {e}", exc_info=True)
+        return SummaryResponse(
+            summary_text="I had trouble generating today's summary. Please try again in a moment.",
+            date=date.today().isoformat(),
+            metrics=SummaryMetrics(
+                medication_adherence=0.0,
+                steps=0,
+                alerts_count=0,
+                avg_aac_score=70,
+                cct_trend="stable",
+            ),
+            events=[],
+            cct_scores=[],
+        )
+
+
+# =====================================================
+# GET /caregiver/aac/{patient_id}
+# =====================================================
+
+@router.get("/caregiver/aac/{patient_id}")
+async def get_aac_score(patient_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Compute and return the current AAC score with full component breakdown.
+    Monty's Flutter app calls this for the AAC badge on the caregiver dashboard.
+    """
+    try:
+        from innovations.aac import compute_aac_score
+        result = await compute_aac_score(patient_id, db)
+        return result
+    except Exception as e:
+        logger.error(f"AAC computation failed: {e}")
+        return {"score": 70, "error": str(e)}
 
 
 # =====================================================

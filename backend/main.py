@@ -136,6 +136,10 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
+from api.dependencies import global_exception_handler
+
+app.add_exception_handler(Exception, global_exception_handler)
+
 # CORS Middleware — allows the Flutter app (running on any port/device) to
 # make requests to this backend. We allow all origins during hackathon dev;
 # in production you'd lock this down to your app's domain.

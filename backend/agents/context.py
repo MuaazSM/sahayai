@@ -39,15 +39,23 @@ async def context_agent(state: AssistState, db: AsyncSession = None) -> AssistSt
                 updates["home_lat"] = user.home_lat or 19.1136
                 updates["home_lng"] = user.home_lng or 72.8697
 
-                # Get latest AAC score
-                aac_result = await db.execute(
-                    select(AACScore)
-                    .where(AACScore.user_id == user_id)
-                    .order_by(AACScore.calculated_at.desc())
-                    .limit(1)
-                )
-                latest_aac = aac_result.scalar_one_or_none()
-                updates["aac_score"] = latest_aac.score if latest_aac else user.aac_baseline
+                # Compute fresh AAC score — pulls from CCT, vitals, routines,
+                # and time-of-day. This is what modulates how aggressive
+                # the Reasoning Agent is with interventions.
+                try:
+                    from innovations.aac import compute_aac_score
+                    aac_result = await compute_aac_score(user_id, db)
+                    updates["aac_score"] = aac_result["score"]
+                    logger.info(
+                        f"AAC computed: {aac_result['score']}/100 "
+                        f"(cct={aac_result['cct_component']:.0f}, "
+                        f"vitals={aac_result['vitals_component']:.0f}, "
+                        f"routine={aac_result['routine_component']:.0f}, "
+                        f"time={aac_result['time_of_day_component']:.0f})"
+                    )
+                except Exception as e:
+                    logger.warning(f"AAC computation failed: {e}, using baseline")
+                    updates["aac_score"] = user.aac_baseline
         except Exception as e:
             logger.warning(f"DB lookup failed: {e}")
             updates["user_name"] = state.get("user_name", "there")

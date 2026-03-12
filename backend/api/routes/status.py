@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from api.models.schemas import StatusRequest, StatusResponse, CaregiverAlertPayload
+from api.routes.websocket import broadcast_alert
 from api.models.database import get_db
 from api.models.tables import User, Event, Alert, CaregiverLink
 from classifier.predict import classify_wearable
@@ -144,6 +145,21 @@ async def check_status(request: StatusRequest, db: AsyncSession = Depends(get_db
             )
             db.add(alert_record)
             logger.info(f"Alert saved for caregiver {cg_link.caregiver_id}: {caregiver_alert.priority}")
+
+            # Push the alert through WebSocket in real time so the
+            # caregiver's phone buzzes instantly instead of waiting for a poll
+            try:
+                await broadcast_alert(cg_link.caregiver_id, {
+                    "alert_type": classification,
+                    "priority": caregiver_alert.priority,
+                    "message": caregiver_alert.message,
+                    "patient_id": request.user_id,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "event_id": event.id,
+                })
+            except Exception as e:
+                # WebSocket push failing should never block the response
+                logger.warning(f"WS broadcast failed: {e}")
 
     return StatusResponse(
         classification=classification,

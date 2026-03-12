@@ -119,6 +119,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+    try:
+        from utils.llm import close_llm_clients
+        await close_llm_clients()
+    except Exception:
+        pass
+
     logger.info("Goodbye!")
 
 

@@ -165,3 +165,23 @@ demo/sample_data/wearable_samples.csv
 !docs/*.docx
 *.pdf
 !docs/*.pdf
+
+# ───────────────────────────────
+# ANDROID BUILD / PLACEHOLDERS
+# ───────────────────────────────
+android/app/build/
+android/hilt_aggregated_deps/
+android/com/
+android/dagger/
+android/drawable/
+android/layout/
+android/values/
+android/mipmap-hdpi/
+android/mipmap-mdpi/
+android/mipmap-xhdpi/
+android/mipmap-xxhdpi/
+android/mipmap-xxxhdpi/
+
+
+#CLAUDE
+CLAUDE.md

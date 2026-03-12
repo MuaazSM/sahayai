@@ -1,0 +1,5 @@
+-keep class com.sahayai.android.domain.model.** { *; }
+-keep class com.sahayai.android.core.network.** { *; }
+-keepattributes *Annotation*
+-keepattributes Signature
+-dontwarn kotlinx.serialization.**

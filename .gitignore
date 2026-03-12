@@ -1,0 +1,167 @@
+# ═══════════════════════════════════════════════════════════
+# SAHAYAI .gitignore
+# ═══════════════════════════════════════════════════════════
+
+# ───────────────────────────────
+# SECRETS & ENVIRONMENT
+# ───────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.secret
+credentials.json
+service-account.json
+
+# ───────────────────────────────
+# PYTHON
+# ───────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+*.whl
+pip-log.txt
+pip-delete-this-directory.txt
+venv/
+env/
+.venv/
+.Python
+pythonenv*/
+
+# ───────────────────────────────
+# ML / CLASSIFIER ARTIFACTS
+# ───────────────────────────────
+*.joblib
+*.pkl
+*.pickle
+*.h5
+*.pt
+*.pth
+*.onnx
+*.safetensors
+backend/classifier/model.*
+!backend/classifier/train.py
+!backend/classifier/predict.py
+
+# ───────────────────────────────
+# CHROMADB / VECTOR DB
+# ───────────────────────────────
+chroma_data/
+chromadb_data/
+.chromadb/
+*.sqlite3
+
+# ───────────────────────────────
+# POSTGRESQL / DATABASE
+# ───────────────────────────────
+*.sql.bak
+pgdata/
+postgres-data/
+
+# ───────────────────────────────
+# FLUTTER / DART
+# ───────────────────────────────
+app/.dart_tool/
+app/.packages
+app/.pub-cache/
+app/.pub/
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.metadata
+app/*.iml
+app/.idea/
+app/android/.gradle/
+app/android/local.properties
+app/android/**/GeneratedPluginRegistrant.*
+app/ios/Flutter/Flutter.framework
+app/ios/Flutter/Flutter.podspec
+app/ios/Flutter/Generated.xcconfig
+app/ios/Flutter/app.flx
+app/ios/Flutter/engine/
+app/ios/ServiceDefinitions.json
+app/ios/Runner/GeneratedPluginRegistrant.*
+app/ios/Pods/
+app/ios/.symlinks/
+app/ios/Runner.xcworkspace/
+app/linux/flutter/
+app/macos/Flutter/
+app/windows/flutter/
+*.g.dart
+*.freezed.dart
+
+# ───────────────────────────────
+# NODE / NPM (if any tooling)
+# ───────────────────────────────
+node_modules/
+package-lock.json
+yarn.lock
+
+# ───────────────────────────────
+# IDE & EDITORS
+# ───────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+
+# ───────────────────────────────
+# OS FILES
+# ───────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ───────────────────────────────
+# LOGS & TEMP
+# ───────────────────────────────
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# ───────────────────────────────
+# DOCKER
+# ───────────────────────────────
+docker-compose.override.yml
+.docker/
+
+# ───────────────────────────────
+# DEMO ARTIFACTS (large files)
+# ───────────────────────────────
+demo/backup/demo_screen_recordings/
+demo/sample_data/wearable_samples.csv
+*.mp4
+*.mov
+*.avi
+
+# ───────────────────────────────
+# GENERATED DOCS (keep source, not output)
+# ───────────────────────────────
+*.docx
+!docs/*.docx
+*.pdf
+!docs/*.pdf

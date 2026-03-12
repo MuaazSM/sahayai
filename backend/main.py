@@ -104,6 +104,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Classifier load failed: {e}. /check-status will use rule-based fallback.")
 
+    # 5. Start the background scheduler — handles auto-summaries,
+    #    AAC recalculation every 15 min, missed medication detection
+    try:
+        from utils.scheduler import start_scheduler
+        start_scheduler()
+        logger.info("Background scheduler started (summaries, AAC, reminders)")
+    except Exception as e:
+        logger.warning(f"Scheduler start failed: {e}. Background tasks disabled.")
+
     logger.info("SahayAI Backend ready to serve requests")
     logger.info("=" * 60)
 
@@ -116,6 +125,12 @@ async def lifespan(app: FastAPI):
         from api.models.database import close_db
         await close_db()
         logger.info("Database connections closed")
+    except Exception:
+        pass
+
+    try:
+        from utils.scheduler import stop_scheduler
+        stop_scheduler()
     except Exception:
         pass
 

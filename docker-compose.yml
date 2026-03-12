@@ -1,0 +1,20 @@
+# Just run: docker-compose up -d
+# PostgreSQL will be ready on localhost:5432
+
+version: "3.9"
+services:
+  db:
+    image: postgres:16
+    container_name: sahayai-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: sahayai
+      POSTGRES_DB: sahayai
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persist data so it survives container restarts during the hackathon
+      - sahayai_pgdata:/var/lib/postgresql/data
+
+volumes:
+  sahayai_pgdata:

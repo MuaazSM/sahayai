@@ -140,18 +140,59 @@ async def _mock_vision_completion(base64_image, prompt, temperature=0.3, max_tok
 
 @pytest.fixture
 def mock_llm_normal():
-    """Patches LLM calls to return normal/safe responses"""
-    with patch("utils.llm.chat_completion", new=_mock_chat_completion_factory("normal")), \
-         patch("utils.llm.vision_completion", new=_mock_vision_completion):
+    """Patches LLM calls everywhere they're imported"""
+    mock_chat = _mock_chat_completion_factory("normal")
+    with patch("utils.llm.chat_completion", new=mock_chat), \
+         patch("utils.llm.vision_completion", new=_mock_vision_completion), \
+         patch("agents.perception.chat_completion", new=mock_chat), \
+         patch("agents.perception.vision_completion", new=_mock_vision_completion), \
+         patch("agents.reasoning.chat_completion", new=mock_chat), \
+         patch("agents.assistance.chat_completion", new=mock_chat), \
+         patch("agents.caregiver.chat_completion", new=mock_chat):
         yield
 
 
 @pytest.fixture
 def mock_llm_high_risk():
-    """Patches LLM calls to return high-risk/distress responses"""
-    with patch("utils.llm.chat_completion", new=_mock_chat_completion_factory("high_risk")), \
-         patch("utils.llm.vision_completion", new=_mock_vision_completion):
+    """Patches LLM calls everywhere they're imported"""
+    mock_chat = _mock_chat_completion_factory("high_risk")
+    with patch("utils.llm.chat_completion", new=mock_chat), \
+         patch("utils.llm.vision_completion", new=_mock_vision_completion), \
+         patch("agents.perception.chat_completion", new=mock_chat), \
+         patch("agents.perception.vision_completion", new=_mock_vision_completion), \
+         patch("agents.reasoning.chat_completion", new=mock_chat), \
+         patch("agents.assistance.chat_completion", new=mock_chat), \
+         patch("agents.caregiver.chat_completion", new=mock_chat):
         yield
+
+
+@pytest.fixture(autouse=True)
+def mock_db_session():
+    """
+    Mock the DB dependency for endpoint tests so they don't need
+    a real PostgreSQL connection. Pipeline-level tests skip DB anyway.
+    """
+    from api.models.database import get_db
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=None)
+    mock_session.execute = AsyncMock(return_value=MagicMock(
+        scalar_one_or_none=MagicMock(return_value=None),
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))),
+        scalar=MagicMock(return_value=0),
+        fetchall=MagicMock(return_value=[]),
+    ))
+    mock_session.add = MagicMock()
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+
+    async def override_get_db():
+        yield mock_session
+
+    from main import app
+    app.dependency_overrides[get_db] = override_get_db
+    yield mock_session
+    app.dependency_overrides.clear()
 
 
 # =====================================================

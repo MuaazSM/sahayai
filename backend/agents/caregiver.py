@@ -205,7 +205,8 @@ async def _generate_caregiver_response(state: AssistState) -> str:
     context_parts.append(f"AAC Score: {state.get('aac_score', 70)}/100")
     context_parts.append(f"CBD (caregiver burnout): {state.get('cbd_score', 0):.0f}/100")
 
-    prompt = f"""{"\n\n".join(context_parts)}
+    joined_context = "\n\n".join(context_parts)
+    prompt = f"""{joined_context}
 
 Caregiver's question: "{state.get('user_message', 'How are things?')}"
 

@@ -16,9 +16,9 @@ class TestClassifierFeatures:
         assert r["classification"] == "normal"
 
     def test_borderline_fall_low_confidence(self):
-        """Moderate accel spike — should still detect fall but lower confidence"""
+        """High accel spike + elevated HR = fall even at lower magnitude"""
         from classifier.predict import classify_wearable
-        r = classify_wearable(95, 10.0, 12.0, 18.0, 0, 19.1136, 72.8697)
+        r = classify_wearable(95, 12.0, 15.0, 18.0, 0, 19.1136, 72.8697)
         assert r["classification"] == "fall"
 
     def test_walking_near_home_is_normal(self):

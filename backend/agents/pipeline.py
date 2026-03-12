@@ -145,23 +145,37 @@ async def run_pipeline(initial_state: dict, db=None) -> AssistState:
 
         assistance_result, caregiver_result = results
 
-        # Merge results — assistance owns response_text, caregiver owns alerts
+        # Merge results carefully — each agent owns different fields,
+        # but agents_executed needs to be COMBINED not overwritten
+        pre_merge_agents = list(state.get("agents_executed", []))
+        pre_merge_llm_calls = state.get("llm_calls_made", 0)
+
         if isinstance(assistance_result, dict):
+            assist_agents = assistance_result.pop("agents_executed", [])
+            assist_llm = assistance_result.pop("llm_calls_made", 0)
             state = {**state, **assistance_result}
+            pre_merge_agents += [a for a in assist_agents if a not in pre_merge_agents]
+            pre_merge_llm_calls += assist_llm
         else:
             logger.error(f"Assistance parallel failed: {assistance_result}")
             state["response_text"] = "I'm here with you. Help is on the way."
-            state["agents_executed"] = state.get("agents_executed", []) + ["assistance(failed)"]
+            pre_merge_agents.append("assistance(failed)")
 
         if isinstance(caregiver_result, dict):
-            # Don't let caregiver overwrite response_text — that's the user's response
+            cg_agents = caregiver_result.pop("agents_executed", [])
+            cg_llm = caregiver_result.pop("llm_calls_made", 0)
             response_text = state.get("response_text", "")
             state = {**state, **caregiver_result}
             if response_text:
                 state["response_text"] = response_text
+            pre_merge_agents += [a for a in cg_agents if a not in pre_merge_agents]
+            pre_merge_llm_calls += cg_llm
         else:
             logger.error(f"Caregiver parallel failed: {caregiver_result}")
-            state["agents_executed"] = state.get("agents_executed", []) + ["caregiver(failed)"]
+            pre_merge_agents.append("caregiver(failed)")
+
+        state["agents_executed"] = pre_merge_agents
+        state["llm_calls_made"] = pre_merge_llm_calls
 
     else:
         logger.info(f"USER-ONLY routing: risk={risk}")

@@ -24,7 +24,7 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField("Boolean", "USE_MOCK_DATA", "true")
+            buildConfigField("Boolean", "USE_MOCK_DATA", "false")
             buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:8000/\"")
             isDebuggable = true
         }

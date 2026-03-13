@@ -173,9 +173,9 @@ fun ConversationScreen(
 
                 // EMR memory card
                 val emrMemory = uiState.emrMemory
-                if (!emrMemory.isNullOrBlank()) {
+                if (emrMemory != null) {
                     EmrMemoryCard(
-                        memoryText = emrMemory,
+                        memoryText = emrMemory.text,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

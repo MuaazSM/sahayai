@@ -4,6 +4,7 @@ import com.sahayai.android.domain.model.Alert
 import com.sahayai.android.domain.model.CaregiverSummary
 import com.sahayai.android.domain.model.CognitiveTrendPoint
 import com.sahayai.android.domain.model.ConversationResponse
+import com.sahayai.android.domain.model.EMRMemory
 import com.sahayai.android.domain.model.Reminder
 import com.sahayai.android.domain.model.SceneResponse
 import com.sahayai.android.domain.model.StatusResponse
@@ -131,7 +132,7 @@ object MockData {
                 aacScore = 75f,
                 cctScore = 71f,
                 emrTriggered = true,
-                emrMemory = "Ramesh's daughter Priya"
+                emrMemory = EMRMemory(text = "Ramesh's daughter Priya called this morning", emotionTag = "love")
             ),
             ConversationResponse(
                 responseText = "It is time for your afternoon medication. Shall I remind you again in 15 minutes?",

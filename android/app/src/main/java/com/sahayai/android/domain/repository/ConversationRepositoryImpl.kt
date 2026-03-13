@@ -11,9 +11,9 @@ class ConversationRepositoryImpl @Inject constructor(
     private val api: SahayAIApiService
 ) : ConversationRepository {
 
-    override suspend fun sendMessage(userId: String, message: String): NetworkResult<ConversationResponse> {
+    override suspend fun sendMessage(userId: String, message: String, conversationId: String?): NetworkResult<ConversationResponse> {
         return safeApiCall {
-            api.sendConversation(ConversationRequest(userId = userId, message = message))
+            api.sendConversation(ConversationRequest(userId = userId, message = message, conversationId = conversationId))
         }
     }
 }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sahayai.android.core.datastore.UserPreferencesRepository
 import com.sahayai.android.core.network.NetworkResult
+import com.sahayai.android.domain.model.EMRMemory
 import com.sahayai.android.domain.repository.ConversationRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +20,7 @@ data class ConversationUiState(
     val transcribedText: String = "",
     val responseText: String = "",
     val aacScore: Float = 0f,
-    val emrMemory: String? = null,
+    val emrMemory: EMRMemory? = null,
     val error: String? = null
 )
 
@@ -32,6 +33,7 @@ class ConversationViewModel @Inject constructor(
 ) : ViewModel() {
 
     private var userId: String = ""
+    private var conversationId: String? = null
 
     private val _uiState = MutableStateFlow(ConversationUiState())
     val uiState: StateFlow<ConversationUiState> = _uiState
@@ -91,9 +93,10 @@ class ConversationViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            when (val result = conversationRepository.sendMessage(targetUserId, message)) {
+            when (val result = conversationRepository.sendMessage(targetUserId, message, conversationId)) {
                 is NetworkResult.Success -> {
                     val response = result.data
+                    if (response.conversationId.isNotBlank()) conversationId = response.conversationId
                     _uiState.update {
                         it.copy(
                             isAwaitingResponse = false,

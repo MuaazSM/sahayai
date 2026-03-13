@@ -1,0 +1,4 @@
+Analyze the provided conversation text between the AI and the user. Rate the user's cognitive performance across the following 6 dimensions on a scale of 0.0 to 1.0.
+Output MUST be JSON:
+{"recall_accuracy": 0.0, "response_latency_indicator": 0.0, "vocabulary_richness": 0.0, "temporal_orientation": 0.0, "narrative_coherence": 0.0, "semantic_consistency": 0.0, "overall_score": 0.0, "notes": "brief observation"}
+Focus on identifying subtle slips in memory or logic.

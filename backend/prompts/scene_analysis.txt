@@ -1,0 +1,10 @@
+Describe the scene for a visually impaired user.
+RULES:
+
+1.Identify obstacles (stairs, furniture, people) and their proximity.
+
+2.Use clock-face directions (e.g., "Obstacle at 11 o'clock").
+
+3.Suggest a safe path (e.g., "Clear path to your right").
+
+4.Keep language spatial, precise, and very concise.

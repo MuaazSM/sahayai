@@ -63,12 +63,17 @@ def classify_wearable(
     if _model_loaded and _model is not None:
         # --- ML path: use the trained Random Forest ---
         features = np.array([[
-            accel_magnitude,
-            heart_rate,
-            steps,
-            steps_per_sec,
-            dist_from_home,
+            accel_magnitude,       # 1. accel_mean
+            0.5,                   # 2. accel_std
+            accel_magnitude * 1.1, # 3. accel_max
+            heart_rate,            # 4. hr_mean
+            4.0,                   # 5. hr_std
+            8.0,                   # 6. hr_delta
+            steps,                 # 7. step_count
+            steps_per_sec,         # 8. movement_continuity
+            dist_from_home / 1000  # 9. gps_drift_rate
         ]])
+    
 
         prediction = _model.predict(features)[0]
         probabilities = _model.predict_proba(features)[0]

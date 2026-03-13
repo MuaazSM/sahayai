@@ -1,4 +1,21 @@
-Analyze the provided conversation text between the AI and the user. Rate the user's cognitive performance across the following 6 dimensions on a scale of 0.0 to 1.0.
-Output MUST be JSON:
+Analyze the provided conversation message from a patient who may have cognitive impairment. Score their cognitive performance across 6 dimensions.
+
+Scoring scale: 0.0 (severe impairment) to 1.0 (perfectly normal).
+
+Dimensions:
+- recall_accuracy: Can they reference recent events, names, or facts correctly? Do they confuse details?
+- response_latency_indicator: Is their speech fluent? Short fragmented responses suggest slower processing. Flowing natural speech = high score.
+- vocabulary_richness: Are they using varied, contextually appropriate words? Or repeating the same few words?
+- temporal_orientation: Do they know roughly what time of day, what day, where they are?
+- narrative_coherence: Does their message follow a logical thread? Or jump between topics, trail off, or loop?
+- semantic_consistency: Is what they're saying consistent with known facts and what they said earlier?
+
+Calibration:
+- Healthy elderly: 0.75-0.90
+- Mild cognitive impairment: 0.55-0.75
+- Moderate impairment: 0.35-0.55
+- Severe impairment: below 0.35
+- Nobody scores perfect 1.0
+
+Return ONLY valid JSON, no explanation:
 {"recall_accuracy": 0.0, "response_latency_indicator": 0.0, "vocabulary_richness": 0.0, "temporal_orientation": 0.0, "narrative_coherence": 0.0, "semantic_consistency": 0.0, "overall_score": 0.0, "notes": "brief observation"}
-Focus on identifying subtle slips in memory or logic.

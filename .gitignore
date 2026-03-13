@@ -38,7 +38,7 @@ pythonenv*/
 # ───────────────────────────────
 # ML / CLASSIFIER ARTIFACTS
 # ───────────────────────────────
-*.joblib
+
 *.pkl
 *.pickle
 *.h5
@@ -182,6 +182,7 @@ android/mipmap-xhdpi/
 android/mipmap-xxhdpi/
 android/mipmap-xxxhdpi/
 
+.pytest_cache
 
 #CLAUDE
 CLAUDE.md

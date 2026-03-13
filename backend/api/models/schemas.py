@@ -37,14 +37,22 @@ class ConversationRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
 
+
+class EMRMemory(BaseModel):
+    text: str
+    emotion_tag: str
+
 class ConversationResponse(BaseModel):
     response_text: str
     conversation_id: str
     cct_score: Optional[float] = None
-    aac_score: Optional[float] = None  # float to match Android ConversationResponse.aacScore: Float
+    aac_score: Optional[int] = None
     emr_triggered: bool = False
-    emr_memory: Optional[str] = None  # plain string — Android emrMemory: String?
-
+    emr_memory: Optional[EMRMemory] = None
+    # TTS audio — if ElevenLabs is available, this contains base64 audio
+    # Flutter plays this directly instead of using robotic local TTS
+    audio_base64: Optional[str] = None
+    audio_provider: Optional[str] = None
 
 # =====================================================
 # /check-status

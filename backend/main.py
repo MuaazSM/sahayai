@@ -33,6 +33,7 @@ from api.routes.status import router as status_router
 from api.routes.caregiver import router as caregiver_router
 from api.routes.reminders import router as reminders_router
 from api.routes.websocket import router as websocket_router
+from api.routes.voice import router as voice_router
 
 # ---------------------------------------------------------------------------
 # Configure logging — we want structured logs so we can debug agent decisions
@@ -135,6 +136,14 @@ async def lifespan(app: FastAPI):
         pass
 
     try:
+        from utils.tts import close_tts_client
+        from utils.stt import close_stt_client
+        await close_tts_client()
+        await close_stt_client()
+    except Exception:
+        pass
+
+    try:
         from utils.llm import close_llm_clients
         await close_llm_clients()
     except Exception:
@@ -189,6 +198,7 @@ app.include_router(status_router,       tags=["Wearable Status"])
 app.include_router(caregiver_router,    tags=["Caregiver"])
 app.include_router(reminders_router,    tags=["Reminders"])
 app.include_router(websocket_router,    tags=["WebSocket"])
+app.include_router(voice_router,        tags=["Voice"])
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.models.schemas import ConversationRequest, ConversationResponse
+from api.models.schemas import ConversationRequest, ConversationResponse, EMRMemory
 from api.models.database import get_db
 from api.models.tables import User, Conversation, ConversationMessage, CCTScore
 from agents.pipeline import run_pipeline
@@ -144,6 +144,19 @@ async def conversation(request: ConversationRequest, db: AsyncSession = Depends(
             except Exception:
                 pass
 
+        # Generate human-like voice audio for the response
+        # This runs async so it doesn't block — if ElevenLabs is slow
+        # or unavailable, Flutter falls back to local TTS
+        audio_base64 = None
+        audio_provider = None
+        try:
+            from utils.tts import text_to_speech
+            tts_result = await text_to_speech(text=response_text)
+            audio_base64 = tts_result.get("audio_base64")
+            audio_provider = tts_result.get("provider")
+        except Exception as e:
+            logger.warning(f"TTS failed: {e}")
+
         return ConversationResponse(
             response_text=response_text,
             conversation_id=conversation_id,
@@ -151,6 +164,8 @@ async def conversation(request: ConversationRequest, db: AsyncSession = Depends(
             aac_score=pipeline_state.get("aac_score"),
             emr_triggered=pipeline_state.get("trigger_emr", False),
             emr_memory=emr_memory,
+            audio_base64=audio_base64,
+            audio_provider=audio_provider,
         )
 
     except Exception as e:

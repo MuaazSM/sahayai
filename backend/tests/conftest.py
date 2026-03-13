@@ -148,7 +148,8 @@ def mock_llm_normal():
          patch("agents.perception.vision_completion", new=_mock_vision_completion), \
          patch("agents.reasoning.chat_completion", new=mock_chat), \
          patch("agents.assistance.chat_completion", new=mock_chat), \
-         patch("agents.caregiver.chat_completion", new=mock_chat):
+         patch("agents.caregiver.chat_completion", new=mock_chat), \
+         patch("api.routes.caregiver.chat_completion", new=mock_chat):
         yield
 
 
@@ -162,8 +163,13 @@ def mock_llm_high_risk():
          patch("agents.perception.vision_completion", new=_mock_vision_completion), \
          patch("agents.reasoning.chat_completion", new=mock_chat), \
          patch("agents.assistance.chat_completion", new=mock_chat), \
-         patch("agents.caregiver.chat_completion", new=mock_chat):
+         patch("agents.caregiver.chat_completion", new=mock_chat), \
+         patch("api.routes.caregiver.chat_completion", new=mock_chat):
         yield
+
+
+# Alias used by test_integration_flows.py
+_mock_llm_factory = _mock_chat_completion_factory
 
 
 @pytest.fixture(autouse=True)

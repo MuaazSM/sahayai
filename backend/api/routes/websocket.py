@@ -52,7 +52,13 @@ async def broadcast_alert(caregiver_id: str, alert_payload: dict):
     """
     if caregiver_id in active_connections:
         websocket = active_connections[caregiver_id]
-        await websocket.send_json(alert_payload)
+        # Wrap in WsAlertMessage shape expected by Android: {type, message, alert}
+        ws_message = {
+            "type": "alert",
+            "message": alert_payload.get("message", alert_payload.get("description", "Alert")),
+            "alert": alert_payload,
+        }
+        await websocket.send_json(ws_message)
         logger.info(f"Alert pushed to caregiver {caregiver_id}")
     else:
         logger.info(f"Caregiver {caregiver_id} not connected. Alert saved to DB only.")

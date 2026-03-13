@@ -16,82 +16,86 @@ from unittest.mock import patch
 # ENDPOINT TESTS — hit /analyze-scene through the API
 # =====================================================
 
+_FAKE_IMAGE = b"\xff\xd8\xff" + b"x" * 200  # minimal JPEG-like bytes
+
+
 class TestAnalyzeSceneEndpoint:
 
-    def test_scene_returns_valid_structure(self, sync_client, mock_llm_normal, sample_camera_payload):
-        """The response should have all required fields from the data contract"""
-        resp = sync_client.post("/analyze-scene", json=sample_camera_payload)
+    def test_scene_returns_valid_structure(self, sync_client, mock_llm_normal):
+        """The response should have all required fields from the data contract (Android SceneResponse)"""
+        resp = sync_client.post("/analyze-scene",
+            data={"user_id": "ramesh-001"},
+            files={"image": ("scene.jpg", _FAKE_IMAGE, "image/jpeg")})
 
         assert resp.status_code == 200
         data = resp.json()
-        assert "scene_description" in data
-        assert "obstacles" in data
-        assert "guidance_text" in data
-        assert "risk_level" in data
-        assert isinstance(data["obstacles"], list)
+        assert "description" in data
+        assert "objects_detected" in data
+        assert "safety_concerns" in data
+        assert "confidence" in data
+        assert isinstance(data["objects_detected"], list)
+        assert isinstance(data["safety_concerns"], list)
 
-    def test_scene_risk_level_valid_values(self, sync_client, mock_llm_normal, sample_camera_payload):
-        """Risk level should only be one of the allowed values"""
-        resp = sync_client.post("/analyze-scene", json=sample_camera_payload)
+    def test_scene_confidence_valid_range(self, sync_client, mock_llm_normal):
+        """Confidence should be a float between 0 and 1"""
+        resp = sync_client.post("/analyze-scene",
+            data={"user_id": "ramesh-001"},
+            files={"image": ("scene.jpg", _FAKE_IMAGE, "image/jpeg")})
         data = resp.json()
-        assert data["risk_level"] in ("none", "low", "medium", "high")
+        assert isinstance(data["confidence"], float)
+        assert 0.0 <= data["confidence"] <= 1.0
 
-    def test_scene_obstacles_have_required_fields(self, sync_client, mock_llm_normal, sample_camera_payload):
-        """Each obstacle should have type, distance, and direction"""
-        resp = sync_client.post("/analyze-scene", json=sample_camera_payload)
+    def test_scene_objects_detected_are_strings(self, sync_client, mock_llm_normal):
+        """Each detected object should be a plain string"""
+        resp = sync_client.post("/analyze-scene",
+            data={"user_id": "ramesh-001"},
+            files={"image": ("scene.jpg", _FAKE_IMAGE, "image/jpeg")})
         data = resp.json()
 
-        for obstacle in data["obstacles"]:
-            assert "type" in obstacle
-            assert "distance" in obstacle
-            assert "direction" in obstacle
+        for obj in data["objects_detected"]:
+            assert isinstance(obj, str)
 
     def test_scene_with_empty_image_returns_graceful_fallback(self, sync_client, mock_llm_normal):
-        """If Flutter sends an empty image (camera failed), we should still get a valid response"""
-        payload = {
-            "image": "",
-            "location": {"lat": 19.1136, "lng": 72.8697},
-            "user_id": "ramesh-001",
-        }
-        resp = sync_client.post("/analyze-scene", json=payload)
+        """If Android sends an empty/tiny image (camera failed), we should still get a valid response"""
+        resp = sync_client.post("/analyze-scene",
+            data={"user_id": "ramesh-001"},
+            files={"image": ("scene.jpg", b"", "image/jpeg")})
         assert resp.status_code == 200
         data = resp.json()
-        # Should get a helpful message, not a crash
-        assert len(data["scene_description"]) > 0
+        assert len(data["description"]) > 0
 
     def test_scene_with_short_image_returns_graceful_fallback(self, sync_client, mock_llm_normal):
-        """If the base64 string is too short to be real, handle gracefully"""
-        payload = {
-            "image": "abc123",
-            "location": {"lat": 19.1136, "lng": 72.8697},
-            "user_id": "ramesh-001",
-        }
-        resp = sync_client.post("/analyze-scene", json=payload)
+        """Very small binary file should handle gracefully"""
+        resp = sync_client.post("/analyze-scene",
+            data={"user_id": "ramesh-001"},
+            files={"image": ("scene.jpg", b"abc", "image/jpeg")})
         assert resp.status_code == 200
 
-    def test_scene_llm_total_failure_still_returns_response(self, sync_client, sample_camera_payload):
+    def test_scene_llm_total_failure_still_returns_response(self, sync_client):
         """Even if all LLM providers are down, user gets a safe fallback"""
         async def _broken_vision(*args, **kwargs):
             raise Exception("All providers down")
 
         with patch("utils.llm.vision_completion", new=_broken_vision):
-            resp = sync_client.post("/analyze-scene", json=sample_camera_payload)
+            resp = sync_client.post("/analyze-scene",
+                data={"user_id": "ramesh-001"},
+                files={"image": ("scene.jpg", _FAKE_IMAGE, "image/jpeg")})
             assert resp.status_code == 200
             data = resp.json()
-            # Should still have a scene_description, even if it's a fallback
-            assert len(data["scene_description"]) > 0
-            assert data["risk_level"] in ("none", "low", "medium", "high")
+            assert len(data["description"]) > 0
 
-    def test_scene_malformed_llm_json_handled(self, sync_client, sample_camera_payload):
+    def test_scene_malformed_llm_json_handled(self, sync_client):
         """If the vision model returns garbage instead of JSON, don't crash"""
         async def _garbage_vision(*args, **kwargs):
             return "Sorry, I can't process images right now. Here's some random text instead."
 
         with patch("utils.llm.vision_completion", new=_garbage_vision):
-            resp = sync_client.post("/analyze-scene", json=sample_camera_payload)
+            resp = sync_client.post("/analyze-scene",
+                data={"user_id": "ramesh-001"},
+                files={"image": ("scene.jpg", _FAKE_IMAGE, "image/jpeg")})
             assert resp.status_code == 200
             data = resp.json()
-            assert len(data["scene_description"]) > 0
+            assert len(data["description"]) > 0
 
 
 # =====================================================

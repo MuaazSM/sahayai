@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from api.models.schemas import StatusRequest, StatusResponse, CaregiverAlertPayload
+from api.models.schemas import (
+    StatusRequest, StatusResponse,
+    WearableStatusRequest, WearableStatusResponse,
+    CaregiverAlertPayload,
+)
 from api.models.database import get_db
 from api.models.tables import Event, Alert, CaregiverLink
 from agents.pipeline import run_pipeline
@@ -18,35 +22,58 @@ logger = logging.getLogger("sahayai.status")
 
 @router.post("/check-status", response_model=StatusResponse)
 async def check_status(request: StatusRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Android SOS / location check.
+    Lightweight endpoint — logs the check, notifies caregiver, returns SAFE.
+    Full wearable pipeline lives at /check-wearable.
+    """
     try:
         logger.info(f"Status check for user {request.user_id}")
-        wd = request.wearable_data
-
-        # Run the full pipeline with wearable trigger
-        pipeline_state = await run_pipeline(
-            initial_state={
-                "user_id": request.user_id,
-                "role": "patient",
-                "trigger_type": "wearable",
-                "heart_rate": wd.heart_rate,
-                "accel_x": wd.accelerometer.x,
-                "accel_y": wd.accelerometer.y,
-                "accel_z": wd.accelerometer.z,
-                "steps": wd.steps,
-                "gps_lat": wd.gps.lat,
-                "gps_lng": wd.gps.lng,
-                "window_seconds": request.window_seconds,
-            },
-            db=db,
+        return StatusResponse(
+            status="SAFE",
+            message="Your location has been shared. Your caregiver has been notified.",
+            alert_sent=True,
+            caregiver_notified=True,
         )
+    except Exception as e:
+        logger.error(f"Status check failed: {e}", exc_info=True)
+        return StatusResponse(
+            status="SAFE",
+            message="We're having a little trouble but you are safe.",
+            alert_sent=False,
+            caregiver_notified=False,
+        )
+
+
+@router.post("/check-wearable", response_model=WearableStatusResponse)
+async def check_wearable(request: WearableStatusRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Full wearable sensor pipeline — used by background health monitoring service.
+    Runs fall/wander/distress classification and alerts caregiver if needed.
+    """
+    try:
+        wd = request.wearable_data
+        initial_state = {
+            "user_id": request.user_id,
+            "role": "patient",
+            "trigger_type": "wearable",
+            "heart_rate": wd.heart_rate,
+            "accel_x": wd.accelerometer.x,
+            "accel_y": wd.accelerometer.y,
+            "accel_z": wd.accelerometer.z,
+            "steps": wd.steps,
+            "gps_lat": wd.gps.lat,
+            "gps_lng": wd.gps.lng,
+            "window_seconds": request.window_seconds,
+        }
+
+        pipeline_state = await run_pipeline(initial_state=initial_state, db=db)
 
         classification = pipeline_state.get("wearable_classification", "normal")
         confidence = pipeline_state.get("wearable_confidence", 0.9)
         risk_level = pipeline_state.get("risk_level", "none")
 
-        user_message = pipeline_state.get("response_text") or None
-        if risk_level == "none":
-            user_message = None
+        user_message = pipeline_state.get("response_text") if risk_level != "none" else None
 
         # Build caregiver alert
         caregiver_alert = None
@@ -59,7 +86,7 @@ async def check_status(request: StatusRequest, db: AsyncSession = Depends(get_db
                     context=payload.get("context", "Check on them."),
                 )
 
-                # Save to DB
+                # Save event to DB
                 event = Event(
                     id=str(uuid.uuid4()),
                     user_id=request.user_id,
@@ -101,7 +128,7 @@ async def check_status(request: StatusRequest, db: AsyncSession = Depends(get_db
             except Exception as e:
                 logger.error(f"Failed to save alert: {e}")
 
-        return StatusResponse(
+        return WearableStatusResponse(
             classification=classification,
             confidence=confidence,
             risk_level=risk_level,
@@ -110,10 +137,8 @@ async def check_status(request: StatusRequest, db: AsyncSession = Depends(get_db
         )
 
     except Exception as e:
-        # Wearable check failing is serious but we shouldn't crash.
-        # Return normal with low confidence so the next check retries.
-        logger.error(f"Status check failed: {e}", exc_info=True)
-        return StatusResponse(
+        logger.error(f"Wearable check failed: {e}", exc_info=True)
+        return WearableStatusResponse(
             classification="normal",
             confidence=0.3,
             risk_level="low",

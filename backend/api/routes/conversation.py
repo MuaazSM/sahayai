@@ -25,7 +25,7 @@ async def conversation(request: ConversationRequest, db: AsyncSession = Depends(
                 response_text="I didn't catch that. Could you say that again?",
                 conversation_id=request.conversation_id or str(uuid.uuid4()),
                 cct_score=None,
-                aac_score=None,
+                aac_score=0.0,
                 emr_triggered=False,
                 emr_memory=None,
             )
@@ -137,10 +137,7 @@ async def conversation(request: ConversationRequest, db: AsyncSession = Depends(
         if pipeline_state.get("trigger_emr") and pipeline_state.get("emr_memory_used"):
             try:
                 mem = pipeline_state["emr_memory_used"]
-                emr_memory = EMRMemory(
-                    text=mem.get("text", "A warm memory."),
-                    emotion_tag=mem.get("metadata", {}).get("emotion", "comfort"),
-                )
+                emr_memory = mem.get("text", "A warm memory.")
             except Exception:
                 pass
 
@@ -161,7 +158,7 @@ async def conversation(request: ConversationRequest, db: AsyncSession = Depends(
             response_text=response_text,
             conversation_id=conversation_id,
             cct_score=cct_composite,
-            aac_score=pipeline_state.get("aac_score"),
+            aac_score=pipeline_state.get("aac_score") or 0.0,
             emr_triggered=pipeline_state.get("trigger_emr", False),
             emr_memory=emr_memory,
             audio_base64=audio_base64,
@@ -176,7 +173,7 @@ async def conversation(request: ConversationRequest, db: AsyncSession = Depends(
             response_text="I'm having a little trouble right now, but I'm still here with you. Could you try saying that again?",
             conversation_id=request.conversation_id or str(uuid.uuid4()),
             cct_score=None,
-            aac_score=None,
+            aac_score=0.0,
             emr_triggered=False,
             emr_memory=None,
         )

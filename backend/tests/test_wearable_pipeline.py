@@ -108,14 +108,14 @@ class TestWearableClassifier:
 
 
 # =====================================================
-# ENDPOINT TESTS — /check-status
+# ENDPOINT TESTS — /check-wearable (full pipeline)
 # =====================================================
 
 class TestCheckStatusEndpoint:
 
     def test_normal_returns_no_alert(self, sync_client, mock_llm_normal, normal_wearable_data):
         """Normal readings should return risk=none with no caregiver alert"""
-        resp = sync_client.post("/check-status", json=normal_wearable_data)
+        resp = sync_client.post("/check-wearable", json=normal_wearable_data)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -126,7 +126,7 @@ class TestCheckStatusEndpoint:
 
     def test_fall_returns_critical_alert(self, sync_client, mock_llm_high_risk, fall_wearable_data):
         """Fall should return critical risk + caregiver alert"""
-        resp = sync_client.post("/check-status", json=fall_wearable_data)
+        resp = sync_client.post("/check-wearable", json=fall_wearable_data)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -137,7 +137,7 @@ class TestCheckStatusEndpoint:
 
     def test_wandering_returns_high_risk(self, sync_client, mock_llm_high_risk, wandering_wearable_data):
         """Wandering should return high risk + alert"""
-        resp = sync_client.post("/check-status", json=wandering_wearable_data)
+        resp = sync_client.post("/check-wearable", json=wandering_wearable_data)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -146,7 +146,7 @@ class TestCheckStatusEndpoint:
 
     def test_distress_returns_user_message(self, sync_client, mock_llm_high_risk, distress_wearable_data):
         """Distress should generate a calming user message"""
-        resp = sync_client.post("/check-status", json=distress_wearable_data)
+        resp = sync_client.post("/check-wearable", json=distress_wearable_data)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -156,7 +156,7 @@ class TestCheckStatusEndpoint:
 
     def test_response_matches_data_contract(self, sync_client, mock_llm_normal, normal_wearable_data):
         """Response should have exactly the fields from our data contract"""
-        resp = sync_client.post("/check-status", json=normal_wearable_data)
+        resp = sync_client.post("/check-wearable", json=normal_wearable_data)
         data = resp.json()
 
         required_fields = ["classification", "confidence", "risk_level", "user_message", "caregiver_alert"]
@@ -172,7 +172,7 @@ class TestCheckStatusEndpoint:
             raise Exception("Everything is on fire")
 
         with patch("api.routes.status.run_pipeline", new=_broken_pipeline):
-            resp = sync_client.post("/check-status", json=normal_wearable_data)
+            resp = sync_client.post("/check-wearable", json=normal_wearable_data)
             assert resp.status_code == 200
             data = resp.json()
             assert data["classification"] == "normal"

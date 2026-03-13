@@ -55,7 +55,11 @@ async def context_agent(state: AssistState, db: AsyncSession = None) -> AssistSt
                     )
                 except Exception as e:
                     logger.warning(f"AAC computation failed: {e}, using baseline")
-                    updates["aac_score"] = user.aac_baseline
+                    updates["aac_score"] = getattr(user, "aac_baseline", 70)
+            else:
+                # User not in DB yet — use sensible default so aac_score is never 0
+                updates["user_name"] = state.get("user_name", "there")
+                updates["aac_score"] = state.get("aac_score", 70)
         except Exception as e:
             logger.warning(f"DB lookup failed: {e}")
             updates["user_name"] = state.get("user_name", "there")

@@ -15,16 +15,12 @@ class SceneRequest(BaseModel):
     location: Location
     user_id: str
 
-class Obstacle(BaseModel):
-    type: str
-    distance: str
-    direction: str
-
 class SceneResponse(BaseModel):
-    scene_description: str
-    obstacles: list[Obstacle]
-    guidance_text: str
-    risk_level: str  # none, low, medium, high
+    """Matches Android SceneResponse data class."""
+    description: str
+    objects_detected: list[str] = []
+    safety_concerns: list[str] = []
+    confidence: float = 1.0
 
 
 # =====================================================
@@ -46,7 +42,7 @@ class ConversationResponse(BaseModel):
     response_text: str
     conversation_id: str
     cct_score: Optional[float] = None
-    aac_score: Optional[int] = None
+    aac_score: Optional[float] = None  # float to match Android ConversationResponse.aacScore: Float
     emr_triggered: bool = False
     emr_memory: Optional[EMRMemory] = None
     # TTS audio — if ElevenLabs is available, this contains base64 audio
@@ -75,20 +71,45 @@ class WearableData(BaseModel):
 
 class StatusRequest(BaseModel):
     user_id: str
+    wearable_data: Optional[WearableData] = None  # optional — Android SOS sends user_id only
+    window_seconds: int = 30
+    location_lat: Optional[float] = None  # Android StatusRequest optional fields
+    location_lng: Optional[float] = None
+
+
+class WearableStatusRequest(BaseModel):
+    """Separate request for the /check-wearable endpoint (background service)."""
+    user_id: str
     wearable_data: WearableData
-    window_seconds: int
+    window_seconds: int = 30
+
 
 class CaregiverAlertPayload(BaseModel):
     priority: str
     message: str
     context: str
 
-class StatusResponse(BaseModel):
-    classification: str  # normal, fall, wandering, distress
+
+class WearableStatusResponse(BaseModel):
+    """Response for /check-wearable — used by background wearable service."""
+    classification: str
     confidence: float
-    risk_level: str  # none, low, medium, high, critical
+    risk_level: str
     user_message: Optional[str] = None
     caregiver_alert: Optional[CaregiverAlertPayload] = None
+
+class StatusResponse(BaseModel):
+    # Backend/pipeline fields (kept for wearable tests)
+    classification: str = "normal"  # normal, fall, wandering, distress
+    confidence: float = 0.9
+    risk_level: str = "none"        # none, low, medium, high, critical
+    user_message: Optional[str] = None
+    caregiver_alert: Optional[CaregiverAlertPayload] = None
+    # Android EmergencyViewModel fields
+    status: str = "ok"
+    message: str = ""
+    alert_sent: bool = False
+    caregiver_notified: bool = False
 
 
 # =====================================================
@@ -113,8 +134,9 @@ class AlertsResponse(BaseModel):
     alerts: list[AlertItem]
 
 class AcknowledgeRequest(BaseModel):
-    action: str  # acknowledge, dismiss, escalate
+    acknowledged_by: str = ""           # Android sends this
     note: Optional[str] = None
+    action: str = "acknowledge"         # acknowledge, dismiss, escalate (kept for internal use)
 
 class AcknowledgeResponse(BaseModel):
     success: bool
@@ -182,17 +204,21 @@ class CognitiveTrendPoint(BaseModel):
 # =====================================================
 
 class ReminderItem(BaseModel):
+    """Matches Android Reminder data class."""
     id: str
-    type: str  # medication, routine, appointment
+    user_id: str
+    title: str
+    description: str = ""
+    reminder_type: str = "OTHER"
     scheduled_time: str
-    message: str
-    status: str  # pending, confirmed, missed
+    is_confirmed: bool = False
+    created_at: str = ""
 
 class RemindersResponse(BaseModel):
     reminders: list[ReminderItem]
 
 class ConfirmReminderRequest(BaseModel):
-    confirmation_method: str  # voice or tap
+    confirmation_method: str = "tap"  # voice or tap; Android sends no body so default to tap
 
 class ConfirmReminderResponse(BaseModel):
     success: bool

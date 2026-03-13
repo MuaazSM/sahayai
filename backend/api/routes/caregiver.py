@@ -99,7 +99,9 @@ async def acknowledge_alert(
     - Escalated alerts get forwarded to secondary caregivers
     - Acknowledged alerts stop the repeated notification loop
     """
-    logger.info(f"Acknowledging alert {alert_id}: action={request.action}")
+    action = request.action
+    acknowledged_by = request.acknowledged_by or "caregiver"
+    logger.info(f"Acknowledging alert {alert_id}: action={action}, by={acknowledged_by}")
 
     alert = await db.get(Alert, alert_id)
     if not alert:
@@ -107,13 +109,15 @@ async def acknowledge_alert(
 
     alert.acknowledged = True
     alert.acknowledged_at = datetime.utcnow()
-    alert.acknowledge_action = request.action
+    alert.acknowledge_action = action
     alert.acknowledge_note = request.note
+    if not alert.caregiver_id and acknowledged_by:
+        alert.caregiver_id = acknowledged_by
 
     # If escalated, we'd normally notify secondary caregivers here
     # For the hackathon demo, just log it
-    if request.action == "escalate":
-        logger.warning(f"Alert {alert_id} ESCALATED by caregiver. Would notify secondary caregivers.")
+    if action == "escalate":
+        logger.warning(f"Alert {alert_id} ESCALATED by {acknowledged_by}. Would notify secondary caregivers.")
 
     return AcknowledgeResponse(
         success=True,
@@ -121,7 +125,8 @@ async def acknowledge_alert(
             "id": alert.id,
             "acknowledged": True,
             "acknowledged_at": alert.acknowledged_at.isoformat(),
-            "action": request.action,
+            "action": action,
+            "acknowledged_by": acknowledged_by,
             "note": request.note,
         },
     )

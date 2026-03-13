@@ -11,6 +11,7 @@ from api.models.schemas import (
     AlertItem, AlertsResponse,
     AcknowledgeRequest, AcknowledgeResponse,
     SummaryResponse, SummaryMetrics, SummaryEvent, CCTScorePoint,
+    CaregiverSummaryResponse, CognitiveTrendPoint,
 )
 from api.models.database import get_db
 from api.models.tables import (
@@ -31,7 +32,7 @@ with open("prompts/caregiver_agent.txt", "r") as f:
 # GET /caregiver/alerts/{patient_id}
 # =====================================================
 
-@router.get("/caregiver/alerts/{patient_id}", response_model=AlertsResponse)
+@router.get("/caregiver/alerts/{patient_id}", response_model=list[AlertItem])
 async def get_alerts(
     patient_id: str,
     since: str = Query(default=None, description="ISO timestamp — only return alerts after this time"),
@@ -39,9 +40,8 @@ async def get_alerts(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Returns the alert feed for a patient. The Flutter app polls this
-    on the caregiver dashboard (and also gets real-time pushes via WebSocket,
-    but this endpoint is the fallback + history scroll).
+    Returns the alert feed for a patient as a flat list.
+    Android expects Response<List<Alert>> — no wrapper object.
     """
     logger.info(f"Fetching alerts for patient {patient_id} (limit={limit})")
 
@@ -52,8 +52,6 @@ async def get_alerts(
         .limit(limit)
     )
 
-    # If `since` is provided, only return alerts newer than that timestamp
-    # This lets the Flutter app do incremental fetches without re-downloading everything
     if since:
         try:
             since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
@@ -67,18 +65,21 @@ async def get_alerts(
     alert_items = [
         AlertItem(
             id=a.id,
+            patient_id=a.patient_id,
+            alert_type=_derive_alert_type(a),
             priority=a.priority,
-            message=a.message,
-            context=a.context,
-            reasoning=a.reasoning,
-            timestamp=a.timestamp.isoformat(),
-            acknowledged=a.acknowledged,
+            title=_extract_title(a.message),
+            description=a.message or "",
+            created_at=a.timestamp.isoformat(),
+            is_acknowledged=a.acknowledged,
+            acknowledged_by=a.caregiver_id if a.acknowledged else None,
+            acknowledged_at=a.acknowledged_at.isoformat() if a.acknowledged_at else None,
         )
         for a in alerts
     ]
 
     logger.info(f"Returning {len(alert_items)} alerts")
-    return AlertsResponse(alerts=alert_items)
+    return alert_items
 
 
 # =====================================================
@@ -130,12 +131,16 @@ async def acknowledge_alert(
 # GET /caregiver/summary/{patient_id}
 # =====================================================
 
-@router.get("/caregiver/summary/{patient_id}", response_model=SummaryResponse)
+@router.get("/caregiver/summary/{patient_id}", response_model=CaregiverSummaryResponse)
 async def get_summary(
     patient_id: str,
     date_str: str = Query(default=None, alias="date", description="YYYY-MM-DD, defaults to today"),
     db: AsyncSession = Depends(get_db),
 ):
+    """
+    Returns daily summary. Response shape matches Android CaregiverSummary data class —
+    flat fields, no nested metrics object.
+    """
     try:
         if date_str:
             try:
@@ -164,26 +169,21 @@ async def get_summary(
             cached = cached_result.scalar_one_or_none()
             if cached:
                 logger.info("Returning cached summary")
-                events_list = []
-                try:
-                    events_list = [
-                        SummaryEvent(**e) for e in json.loads(cached.events_json or "[]")
-                    ]
-                except Exception:
-                    pass
-
-                return SummaryResponse(
-                    summary_text=cached.summary_text,
+                avg_cct = await _compute_avg_cct(patient_id, day_start, day_end, db)
+                return CaregiverSummaryResponse(
+                    patient_id=patient_id,
                     date=cached.summary_date.isoformat(),
-                    metrics=SummaryMetrics(
-                        medication_adherence=cached.medication_adherence,
-                        steps=cached.total_steps,
-                        alerts_count=cached.alerts_count,
-                        avg_aac_score=cached.avg_aac_score,
-                        cct_trend=cached.cct_trend,
-                    ),
-                    events=events_list,
-                    cct_scores=[],
+                    steps_today=cached.total_steps,
+                    reminders_completed=int(cached.medication_adherence * 10),  # approximation until real column added
+                    reminders_total=10,
+                    avg_cct_score=avg_cct,
+                    risk_level=_aac_to_risk(cached.avg_aac_score),
+                    aac_score=float(cached.avg_aac_score),
+                    conversations_today=0,
+                    mood_summary=cached.summary_text,
+                    medication_adherence=cached.medication_adherence,
+                    alerts_count=cached.alerts_count,
+                    cct_trend=cached.cct_trend,
                 )
         except Exception as e:
             logger.warning(f"Cache lookup failed: {e}")
@@ -237,7 +237,7 @@ async def get_summary(
         )
         alerts = alerts_result.scalars().all()
 
-        # Medication adherence
+        # Medication adherence + reminder counts
         med_total_result = await db.execute(
             select(func.count(Reminder.id))
             .where(and_(
@@ -268,27 +268,16 @@ async def get_summary(
             sum(a.score for a in aac_scores) / len(aac_scores)
         ) if aac_scores else (user.aac_baseline if user else 70)
 
+        avg_cct = (
+            sum(s.composite_score for s in cct_scores) / len(cct_scores)
+        ) if cct_scores else 0.0
+
+        # Count conversations today (events with type "conversation")
+        conversations_today = sum(1 for e in events if e.event_type == "conversation")
+
         cct_trend = await _compute_cct_trend(patient_id, summary_date, cct_scores, db)
 
-        events_for_response = [
-            SummaryEvent(
-                time=e.timestamp.strftime("%H:%M"),
-                type=e.event_type,
-                description=e.description,
-                severity=e.severity,
-            )
-            for e in events
-        ]
-
-        cct_for_response = [
-            CCTScorePoint(
-                date=c.scored_at.strftime("%Y-%m-%d"),
-                score=c.composite_score,
-            )
-            for c in cct_scores
-        ]
-
-        # Generate summary via LLM
+        # Generate mood summary via LLM
         events_for_llm = _format_events_for_llm(events)
         summary_context = f"""
 Patient: {user_name}
@@ -315,7 +304,7 @@ Generate the daily summary now."""
             {"role": "user", "content": summary_context},
         ]
 
-        summary_text = await chat_completion(
+        mood_summary = await chat_completion(
             messages=summary_messages,
             model_preference="quality",
             temperature=0.5,
@@ -328,7 +317,7 @@ Generate the daily summary now."""
                 id=str(uuid.uuid4()),
                 patient_id=patient_id,
                 summary_date=summary_date,
-                summary_text=summary_text,
+                summary_text=mood_summary,
                 medication_adherence=medication_adherence,
                 total_steps=total_steps,
                 alerts_count=len(alerts),
@@ -344,35 +333,59 @@ Generate the daily summary now."""
         except Exception as e:
             logger.warning(f"Failed to cache summary: {e}")
 
-        return SummaryResponse(
-            summary_text=summary_text,
+        return CaregiverSummaryResponse(
+            patient_id=patient_id,
             date=summary_date.isoformat(),
-            metrics=SummaryMetrics(
-                medication_adherence=medication_adherence,
-                steps=total_steps,
-                alerts_count=len(alerts),
-                avg_aac_score=avg_aac,
-                cct_trend=cct_trend,
-            ),
-            events=events_for_response,
-            cct_scores=cct_for_response,
+            steps_today=total_steps,
+            reminders_completed=med_confirmed,
+            reminders_total=med_total,
+            avg_cct_score=round(avg_cct, 3),
+            risk_level=_aac_to_risk(avg_aac),
+            aac_score=float(avg_aac),
+            conversations_today=conversations_today,
+            mood_summary=mood_summary,
+            medication_adherence=medication_adherence,
+            alerts_count=len(alerts),
+            cct_trend=cct_trend,
         )
 
     except Exception as e:
         logger.error(f"Summary generation failed: {e}", exc_info=True)
-        return SummaryResponse(
-            summary_text="I had trouble generating today's summary. Please try again in a moment.",
+        return CaregiverSummaryResponse(
+            patient_id=patient_id,
             date=date.today().isoformat(),
-            metrics=SummaryMetrics(
-                medication_adherence=0.0,
-                steps=0,
-                alerts_count=0,
-                avg_aac_score=70,
-                cct_trend="stable",
-            ),
-            events=[],
-            cct_scores=[],
+            mood_summary="I had trouble generating today's summary. Please try again in a moment.",
+            risk_level="LOW",
+            aac_score=70.0,
+            cct_trend="stable",
         )
+
+
+# =====================================================
+# GET /caregiver/trends/{patient_id}
+# =====================================================
+
+@router.get("/caregiver/trends/{patient_id}", response_model=list[CognitiveTrendPoint])
+async def get_cognitive_trends(
+    patient_id: str,
+    days: int = Query(default=14, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns 14-day CCT + AAC trend data for the caregiver cognitive chart.
+    Android CognitiveTrendScreen calls GET /caregiver/trends/{patient_id}.
+    """
+    from innovations.cct import get_cct_trend
+    trend = await get_cct_trend(patient_id, days=days, db=db)
+    return [
+        CognitiveTrendPoint(
+            date=point["date"],
+            cct_score=point["cct_score"],
+            aac_score=point.get("aac_score"),
+            conversation_count=point.get("conversation_count", 0),
+        )
+        for point in trend
+    ]
 
 
 # =====================================================
@@ -417,6 +430,67 @@ async def get_aac_score(patient_id: str, db: AsyncSession = Depends(get_db)):
 # =====================================================
 # HELPER FUNCTIONS
 # =====================================================
+
+def _derive_alert_type(alert: Alert) -> str:
+    """
+    Derive a categorical alert_type from the alert message/context.
+    Android Alert.alert_type is used for icon selection in the feed.
+    """
+    text = f"{alert.message or ''} {alert.context or ''}".lower()
+    if "fall" in text:
+        return "fall"
+    if "wander" in text or "location" in text:
+        return "wandering"
+    if "medication" in text or "medicine" in text or "pill" in text:
+        return "medication"
+    if "distress" in text or "confused" in text or "agitat" in text:
+        return "cognitive"
+    if "emergency" in alert.priority:
+        return "emergency"
+    return "general"
+
+
+def _extract_title(message: str) -> str:
+    """Short title (≤60 chars) derived from the first sentence of the alert message."""
+    if not message:
+        return "Alert"
+    first_sentence = message.split(".")[0].strip()
+    if len(first_sentence) <= 60:
+        return first_sentence
+    return first_sentence[:57] + "..."
+
+
+def _aac_to_risk(aac_score: int) -> str:
+    """Convert AAC score (0-100) to Android risk_level string."""
+    if aac_score >= 70:
+        return "LOW"
+    if aac_score >= 50:
+        return "MEDIUM"
+    if aac_score >= 30:
+        return "HIGH"
+    return "CRITICAL"
+
+
+async def _compute_avg_cct(
+    patient_id: str,
+    day_start: datetime,
+    day_end: datetime,
+    db: AsyncSession,
+) -> float:
+    """Compute average CCT composite for a day window."""
+    result = await db.execute(
+        select(CCTScore)
+        .where(and_(
+            CCTScore.user_id == patient_id,
+            CCTScore.scored_at >= day_start,
+            CCTScore.scored_at <= day_end,
+        ))
+    )
+    scores = result.scalars().all()
+    if not scores:
+        return 0.0
+    return round(sum(s.composite_score for s in scores) / len(scores), 3)
+
 
 def _extract_steps_from_event(event: Event) -> int:
     """

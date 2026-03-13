@@ -37,17 +37,13 @@ class ConversationRequest(BaseModel):
     message: str
     conversation_id: Optional[str] = None
 
-class EMRMemory(BaseModel):
-    text: str
-    emotion_tag: str
-
 class ConversationResponse(BaseModel):
     response_text: str
     conversation_id: str
     cct_score: Optional[float] = None
-    aac_score: Optional[int] = None
+    aac_score: Optional[float] = None  # float to match Android ConversationResponse.aacScore: Float
     emr_triggered: bool = False
-    emr_memory: Optional[EMRMemory] = None
+    emr_memory: Optional[str] = None  # plain string — Android emrMemory: String?
 
 
 # =====================================================
@@ -92,15 +88,20 @@ class StatusResponse(BaseModel):
 # =====================================================
 
 class AlertItem(BaseModel):
+    """Matches Android Alert data class (Alert.kt)"""
     id: str
-    priority: str  # routine, attention, urgent, emergency
-    message: str
-    context: str
-    reasoning: Optional[str] = None
-    timestamp: str
-    acknowledged: bool
+    patient_id: str
+    alert_type: str     # e.g. "fall", "medication", "wandering", "cognitive"
+    priority: str       # routine, attention, urgent, emergency
+    title: str
+    description: str
+    created_at: str     # ISO timestamp — Android @SerialName("created_at")
+    is_acknowledged: bool = False
+    acknowledged_by: Optional[str] = None
+    acknowledged_at: Optional[str] = None
 
 class AlertsResponse(BaseModel):
+    """Kept for internal use — Android reads the list directly."""
     alerts: list[AlertItem]
 
 class AcknowledgeRequest(BaseModel):
@@ -134,11 +135,38 @@ class CCTScorePoint(BaseModel):
     score: float
 
 class SummaryResponse(BaseModel):
+    """Legacy — kept for internal cache. Android uses CaregiverSummaryResponse."""
     summary_text: str
     date: str
     metrics: SummaryMetrics
     events: list[SummaryEvent]
     cct_scores: list[CCTScorePoint]
+
+
+class CaregiverSummaryResponse(BaseModel):
+    """Flat schema matching Android CaregiverSummary data class."""
+    patient_id: str
+    date: str
+    steps_today: int = 0
+    reminders_completed: int = 0
+    reminders_total: int = 0
+    avg_cct_score: float = 0.0
+    risk_level: str = "LOW"        # LOW / MEDIUM / HIGH / CRITICAL
+    aac_score: float = 75.0
+    conversations_today: int = 0
+    mood_summary: str = ""
+    # Extra fields surfaced on caregiver dashboard (harmless for Android, ignored via @SerialName)
+    medication_adherence: float = 1.0
+    alerts_count: int = 0
+    cct_trend: str = "stable"      # stable, improving, declining
+
+
+class CognitiveTrendPoint(BaseModel):
+    """Matches Android CognitiveTrendPoint data class."""
+    date: str
+    cct_score: float
+    aac_score: Optional[float] = None
+    conversation_count: int = 0
 
 
 # =====================================================

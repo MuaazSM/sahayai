@@ -175,26 +175,29 @@ class TestConversationPipeline:
 class TestCaregiverEndpoints:
 
     def test_alerts_endpoint_returns_list(self, sync_client):
-        """GET /caregiver/alerts should return an alerts array"""
+        """GET /caregiver/alerts should return a flat list (Android expects Response<List<Alert>>)"""
         resp = sync_client.get("/caregiver/alerts/ramesh-001")
         assert resp.status_code == 200
         data = resp.json()
-        assert "alerts" in data
-        assert isinstance(data["alerts"], list)
+        assert isinstance(data, list)
 
     def test_summary_endpoint_returns_valid_structure(self, sync_client, mock_llm_normal):
-        """GET /caregiver/summary should return full summary with metrics"""
+        """GET /caregiver/summary should return Android-compatible CaregiverSummary flat fields"""
         resp = sync_client.get("/caregiver/summary/ramesh-001")
         assert resp.status_code == 200
         data = resp.json()
 
-        assert "summary_text" in data
-        assert "metrics" in data
-        assert "events" in data
-        metrics = data["metrics"]
-        assert "medication_adherence" in metrics
-        assert "cct_trend" in metrics
-        assert metrics["cct_trend"] in ("stable", "improving", "declining")
+        # Android CaregiverSummary flat fields
+        assert "patient_id" in data
+        assert "mood_summary" in data
+        assert "avg_cct_score" in data
+        assert "aac_score" in data
+        assert "risk_level" in data
+        assert data["risk_level"] in ("LOW", "MEDIUM", "HIGH", "CRITICAL")
+        assert "steps_today" in data
+        # Extra dashboard field still present
+        assert "cct_trend" in data
+        assert data["cct_trend"] in ("stable", "improving", "declining")
 
     def test_acknowledge_nonexistent_alert(self, sync_client):
         """Acknowledging a fake alert should return success=false"""

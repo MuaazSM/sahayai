@@ -5,7 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.models.schemas import ConversationRequest, ConversationResponse, EMRMemory
+from api.models.schemas import ConversationRequest, ConversationResponse
 from api.models.database import get_db
 from api.models.tables import User, Conversation, ConversationMessage, CCTScore
 from agents.pipeline import run_pipeline
